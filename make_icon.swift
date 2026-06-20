@@ -3,7 +3,7 @@ import Cocoa
 // Rendert das Gauge-Ring-App-Icon in alle benötigten Größen (.iconset)
 // Aufruf: swift make_icon.swift <ziel-iconset-ordner>
 
-let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "ClaudeUsage.iconset"
+let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AIUsageBar.iconset"
 try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 
 func renderPNG(size: Int) -> Data {
