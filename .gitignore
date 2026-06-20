@@ -1,0 +1,19 @@
+# Build-Ausgaben
+build/
+dist/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Kompilate / temporäre Dateien
+*.o
+*.swiftmodule
+*.dSYM/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.xcuserstate
+xcuserdata/
