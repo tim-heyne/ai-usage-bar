@@ -1,5 +1,8 @@
 # AI Usage Bar
 
+[![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-D97757)](https://claude.com/claude-code)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+
 Eine schlanke **macOS-Menüleisten-App**, die deinen aktuellen Claude-Verbrauch – Session- und Wochenlimit – direkt in der Menüleiste anzeigt.
 
 ![AI Usage Bar in der Menüleiste](docs/screenshot.png)
@@ -54,3 +57,7 @@ MIT – siehe [`LICENSE`](LICENSE).
 ## Haftungsausschluss
 
 Dies ist ein **inoffizielles Community-Tool** und steht **in keiner Verbindung zu Anthropic**. „Claude" und „Anthropic" sind Marken ihrer jeweiligen Inhaber. Die App nutzt einen inoffiziellen Endpoint, der sich jederzeit ändern oder wegfallen kann – die Nutzung erfolgt ohne Gewähr.
+
+---
+
+🤖 Erstellt mit [Claude Code](https://claude.com/claude-code)

@@ -1,3 +1,6 @@
+// AI Usage Bar – macOS-Menüleisten-App für den Claude-Verbrauch
+// Erstellt mit Claude Code (https://claude.com/claude-code)
+// Lizenz: MIT
 import Cocoa
 
 // MARK: - Datenmodell
@@ -152,9 +155,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func color(for percent: Int) -> NSColor {
         switch percent {
-        case 90...:  return .systemRed
-        case 70..<90: return .systemOrange
-        default:     return .labelColor
+        case 100...:   return .systemPurple   // Limit erreicht → lila
+        case 90..<100: return .systemRed
+        case 70..<90:  return .systemOrange
+        default:       return .labelColor
         }
     }
 
