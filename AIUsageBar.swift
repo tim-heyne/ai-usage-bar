@@ -21,7 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var lastError: String?
 
     let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    let refreshInterval: TimeInterval = 600   // Hintergrund-Refresh alle 10 Min
+    let refreshInterval: TimeInterval = 300   // Hintergrund-Refresh alle 5 Min
     let menuThrottle: TimeInterval = 60        // beim Öffnen höchstens 1x/Min neu laden
 
     func applicationDidFinishLaunching(_ notification: Notification) {
