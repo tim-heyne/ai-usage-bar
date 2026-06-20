@@ -12,7 +12,7 @@ Klick auf das Menüleisten-Element zeigt Details (Balken, Prozent, wann sich das
 ## Installation
 1. Das **DMG per Doppelklick öffnen**.
 2. Im Finder Rechtsklick auf **install.sh** → *Öffnen mit* → *Terminal*
-   – oder im Terminal: `bash "/Pfad/zu/install.sh"`
+   – oder im Terminal: `bash "/Volumes/AI Usage Bar/install.sh"`
 3. Fertig. Die App erscheint in der Menüleiste und startet künftig automatisch beim Login.
 
 Falls in der Menüleiste **„Claude ⚠ / Kein Login gefunden"** steht: einmal `claude` im Terminal
@@ -27,7 +27,7 @@ rm -rf "/Applications/AI Usage Bar.app"
 ## Hinweise
 - Die App fragt einen inoffiziellen Endpoint ab (dieselbe Quelle wie `/usage` in Claude Code).
   Funktion kann sich theoretisch ändern, falls Anthropic den Endpoint anpasst.
-- Aktualisierung: automatisch alle 10 Minuten und beim Öffnen des Menüs (max. 1×/Minute).
+- Aktualisierung: automatisch alle 5 Minuten und beim Öffnen des Menüs (max. 1×/Minute).
 
 ## Lizenz & Haftungsausschluss
 Dieses Projekt steht unter der **MIT-Lizenz** (siehe `LICENSE`).
