@@ -21,7 +21,7 @@ Eine schlanke **macOS-Menüleisten-App**, die deinen aktuellen Claude-Verbrauch 
 
 ## Installation (fertiges DMG)
 
-1. DMG aus den [Releases](#) herunterladen und per Doppelklick öffnen.
+1. DMG aus den [Releases](https://github.com/tim-heyne/ai-usage-bar/releases/latest) herunterladen und per Doppelklick öffnen.
 2. Im Finder Rechtsklick auf `install.sh` → *Öffnen mit* → *Terminal*.
 3. Die App erscheint in der Menüleiste und startet künftig automatisch beim Login.
 
