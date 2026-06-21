@@ -52,9 +52,10 @@ let imgInputDir = (inPath as NSString).deletingLastPathComponent
 let maxContentW: CGFloat = 495   // A4-Breite 595 - 2×50 Rand
 
 func makeImageAttachment(_ path: String) -> NSAttributedString? {
-    let full = path.hasPrefix("/")
+    let raw = path.hasPrefix("/")
         ? path
         : (imgInputDir as NSString).appendingPathComponent(path)
+    let full = (raw as NSString).standardizingPath   // löst ../ auf
     guard let img = NSImage(contentsOfFile: full) else { return nil }
     var sz = img.size
     if sz.width > maxContentW {                 // proportional verkleinern
