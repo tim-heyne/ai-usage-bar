@@ -16,7 +16,7 @@ Eine schlanke **macOS-Menüleisten-App**, die deinen aktuellen Claude-Verbrauch 
 
 ## Voraussetzungen
 
-- Mac mit **Apple Silicon** (M1/M2/M3/M4), macOS 13 oder neuer
+- Mac mit **Apple Silicon** (M1 oder neuer), macOS 13 oder neuer
 - **Claude Code** installiert und eingeloggt (die App liest den Login lokal aus – es werden keine Zugangsdaten übertragen oder gespeichert)
 
 ## Installation (fertiges DMG)

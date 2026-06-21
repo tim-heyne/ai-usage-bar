@@ -5,7 +5,7 @@ Zeigt deinen aktuellen Claude-Verbrauch direkt in der macOS-Menüleiste.
 Klick auf das Menüleisten-Element zeigt Details (Balken, Prozent, wann sich das Limit zurücksetzt).
 
 ## Voraussetzungen
-- Mac mit **Apple Silicon** (M1/M2/M3/M4), macOS 13 oder neuer
+- Mac mit **Apple Silicon** (M1 oder neuer), macOS 13 oder neuer
 - **Claude Code** ist installiert und du bist eingeloggt
   (die App liest deinen Login lokal aus – es werden keine Zugangsdaten übertragen oder gespeichert)
 
