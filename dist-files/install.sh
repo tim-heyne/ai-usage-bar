@@ -39,6 +39,8 @@ open "$DEST"
 sleep 2
 
 echo ""
-echo "Fertig! Oben rechts in der Menüleiste steht jetzt z. B. 'S 12%  W 3%'."
+echo "Fertig! Oben rechts in der Menüleiste erscheint jetzt ein farbiger Ring,"
+echo "der deinen Claude-Verbrauch der letzten 5 Stunden anzeigt."
+echo "Fahr mit der Maus darüber, um Session- und Wochen-Verbrauch in Prozent zu sehen."
 echo "Voraussetzung: Claude Code ist installiert und du bist eingeloggt."
 echo "Falls 'Kein Login gefunden' erscheint: einmal 'claude' starten und einloggen."

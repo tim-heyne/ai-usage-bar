@@ -3,7 +3,7 @@
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-D97757)](https://claude.com/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
-Eine schlanke **macOS-Menüleisten-App**, die deinen aktuellen Claude-Verbrauch – Session- und Wochenlimit – direkt in der Menüleiste anzeigt.
+Eine schlanke **macOS-Menüleisten-App**, die deinen aktuellen Claude-Verbrauch als farbigen Ring in der Menüleiste anzeigt – Session- und Wochenlimit im Detail per Tooltip und Popover.
 
 ![AI Usage Bar in der Menüleiste](docs/screenshot.png)
 
