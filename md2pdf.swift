@@ -36,6 +36,7 @@ let codeColor   = NSColor(calibratedWhite: 0.15, alpha: 1)
 let inlineBg    = NSColor(calibratedWhite: 0.93, alpha: 1)
 let codeBlockBg = NSColor(calibratedWhite: 0.965, alpha: 1)
 let codeBorder  = NSColor(calibratedWhite: 0.88, alpha: 1)
+let linkColor   = NSColor(srgbRed: 0.0, green: 0.42, blue: 0.85, alpha: 1)
 
 let body  = NSFont.systemFont(ofSize: 11)
 let bold  = NSFont.boldSystemFont(ofSize: 11)
@@ -46,7 +47,27 @@ let h1Font = NSFont.boldSystemFont(ofSize: 22)
 let h2Font = NSFont.boldSystemFont(ofSize: 15)
 let h3Font = NSFont.boldSystemFont(ofSize: 12.5)
 
-// ── Inline-Formatierung: **fett**, `code`, *kursiv* ──────────
+// ── Bilder: ![alt](pfad) → NSTextAttachment (auf Breite skaliert) ─
+let imgInputDir = (inPath as NSString).deletingLastPathComponent
+let maxContentW: CGFloat = 495   // A4-Breite 595 - 2×50 Rand
+
+func makeImageAttachment(_ path: String) -> NSAttributedString? {
+    let full = path.hasPrefix("/")
+        ? path
+        : (imgInputDir as NSString).appendingPathComponent(path)
+    guard let img = NSImage(contentsOfFile: full) else { return nil }
+    var sz = img.size
+    if sz.width > maxContentW {                 // proportional verkleinern
+        let s = maxContentW / sz.width
+        sz = NSSize(width: maxContentW, height: sz.height * s)
+    }
+    let att = NSTextAttachment()
+    att.image = img
+    att.bounds = NSRect(origin: .zero, size: sz)
+    return NSAttributedString(attachment: att)
+}
+
+// ── Inline-Formatierung: **fett**, `code`, *kursiv*, Links, Bilder ─
 func appendInline(_ s: String, to out: NSMutableAttributedString,
                   base: NSFont, color: NSColor, ps: NSParagraphStyle) {
     let chars = Array(s)
@@ -68,6 +89,27 @@ func appendInline(_ s: String, to out: NSMutableAttributedString,
         return nil
     }
     while i < chars.count {
+        // ![alt](pfad) – Inline-Bild
+        if chars[i] == "!", i + 1 < chars.count, chars[i + 1] == "[",
+           let rb = close(i + 2, ["]"]), rb + 1 < chars.count, chars[rb + 1] == "(",
+           let rp = close(rb + 2, [")"]) {
+            flush()
+            if let img = makeImageAttachment(String(chars[(rb + 2)..<rp])) {
+                out.append(img)
+            }
+            i = rp + 1; continue
+        }
+        // [text](url) – Link
+        if chars[i] == "[", let rb = close(i + 1, ["]"]),
+           rb + 1 < chars.count, chars[rb + 1] == "(", let rp = close(rb + 2, [")"]) {
+            flush()
+            var a: [NSAttributedString.Key: Any] = [
+                .font: base, .foregroundColor: linkColor, .paragraphStyle: ps,
+                .underlineStyle: NSUnderlineStyle.single.rawValue]
+            if let u = URL(string: String(chars[(rb + 2)..<rp])) { a[.link] = u }
+            out.append(NSAttributedString(string: String(chars[(i + 1)..<rb]), attributes: a))
+            i = rp + 1; continue
+        }
         // **fett**
         if i + 1 < chars.count, chars[i] == "*", chars[i + 1] == "*",
            let c = close(i + 2, ["*", "*"]) {
@@ -123,6 +165,45 @@ func newline(_ p: NSParagraphStyle) {
     out.append(NSAttributedString(string: "\n", attributes: [.font: body, .paragraphStyle: p, .foregroundColor: textColor]))
 }
 
+// ── Tabellen (GitHub-Flavored: | … | mit |---|-Trennzeile) ───
+func isTableSeparator(_ s: String) -> Bool {
+    let t = s.trimmingCharacters(in: .whitespaces)
+    guard t.contains("-"), t.contains("|") else { return false }
+    return t.allSatisfy { "|-: ".contains($0) }   // nur |, -, :, Leerzeichen
+}
+func splitRow(_ s: String) -> [String] {
+    var t = s.trimmingCharacters(in: .whitespaces)
+    if t.hasPrefix("|") { t.removeFirst() }
+    if t.hasSuffix("|") { t.removeLast() }
+    return t.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+}
+func appendTable(_ rows: [[String]]) {
+    guard !rows.isEmpty else { return }
+    let cols = rows.map { $0.count }.max() ?? 1
+    let table = NSTextTable()
+    table.numberOfColumns = cols
+    table.setContentWidth(100, type: .percentageValueType)   // volle Breite
+    for (r, row) in rows.enumerated() {
+        for c in 0..<cols {
+            let cell = c < row.count ? row[c] : ""
+            let block = NSTextTableBlock(table: table, startingRow: r, rowSpan: 1,
+                                         startingColumn: c, columnSpan: 1)
+            block.setBorderColor(codeBorder)
+            block.setWidth(0.5, type: .absoluteValueType, for: .border)
+            block.setWidth(5, type: .absoluteValueType, for: .padding)
+            if r == 0 { block.backgroundColor = inlineBg }   // Kopfzeile hinterlegen
+            let cps = NSMutableParagraphStyle()
+            cps.textBlocks = [block]
+            cps.paragraphSpacing = 0
+            let f = r == 0 ? bold : body
+            appendInline(cell, to: out, base: f, color: textColor, ps: cps)
+            out.append(NSAttributedString(string: "\n",
+                attributes: [.font: f, .paragraphStyle: cps, .foregroundColor: textColor]))
+        }
+    }
+    newline(ps(spacingBefore: 2, spacingAfter: 8))           // Abstand nach Tabelle
+}
+
 var i = 0
 while i < lines.count {
     let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
@@ -141,6 +222,32 @@ while i < lines.count {
         out.append(NSAttributedString(string: buf.joined(separator: "\n") + "\n",
             attributes: [.font: codeMono, .foregroundColor: codeColor,
                          .paragraphStyle: codePS, .codeBlock: true]))
+        continue
+    }
+
+    // Bild als eigener Block: ![alt](pfad)
+    if trimmed.hasPrefix("!["), let rb = trimmed.range(of: "]("),
+       let rp = trimmed.range(of: ")", range: rb.upperBound..<trimmed.endIndex) {
+        let path = String(trimmed[rb.upperBound..<rp.lowerBound])
+        if let att = makeImageAttachment(path) {
+            let p = ps(spacingBefore: 6, spacingAfter: 8)
+            let m = NSMutableAttributedString(attributedString: att)
+            m.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: m.length))
+            out.append(m); newline(p)
+        }
+        i += 1; continue
+    }
+
+    // Tabelle: Zeile mit | und nächste Zeile als Trenn-Zeile (|---|---|)
+    if trimmed.contains("|"), i + 1 < lines.count, isTableSeparator(lines[i + 1]) {
+        var rows: [[String]] = [splitRow(trimmed)]
+        i += 2                                   // Kopfzeile + Trenn-Zeile überspringen
+        while i < lines.count {
+            let t = lines[i].trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty, t.contains("|") else { break }
+            rows.append(splitRow(t)); i += 1
+        }
+        appendTable(rows)
         continue
     }
 
@@ -200,7 +307,9 @@ while i < lines.count {
     var para: [String] = [trimmed]; i += 1
     while i < lines.count {
         let t = lines[i].trimmingCharacters(in: .whitespaces)
-        if t.isEmpty || t.hasPrefix("#") || t.hasPrefix("- ") || t.hasPrefix("```") || isOrdered(t) { break }
+        if t.isEmpty || t.hasPrefix("#") || t.hasPrefix("- ") || t.hasPrefix("```")
+            || t.hasPrefix("![") || (t.contains("|") && i + 1 < lines.count && isTableSeparator(lines[i + 1]))
+            || isOrdered(t) { break }
         para.append(t); i += 1
     }
     let p = ps(spacingAfter: 6)
