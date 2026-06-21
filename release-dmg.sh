@@ -15,7 +15,7 @@ ICON="$DIR/AppIcon.icns"
 
 APP_NAME="AI Usage Bar"
 VOL_NAME="AI Usage Bar"
-VERSION="1.0"            # bei neuem Release nur hier hochzählen
+VERSION="${VERSION:-1.0}"  # aus Umgebung (z.B. GitHub-Actions-Tag), sonst Fallback 1.0
 STAGING="$DIR/dist/dmg-staging"
 APP="$STAGING/$APP_NAME.app"
 MACOS="$APP/Contents/MacOS"
