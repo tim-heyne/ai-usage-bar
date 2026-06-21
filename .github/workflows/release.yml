@@ -15,7 +15,8 @@ jobs:
     runs-on: macos-latest          # Cloud-Mac mit Xcode/swiftc/codesign/hdiutil
     steps:
       - name: Code auschecken
-        uses: actions/checkout@v4
+        # Auf Commit-SHA gepinnt (Lieferketten-Sicherheit); Kommentar = lesbare Version
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Version aus Tag ableiten
         # Tag "v1.0.1" -> VERSION "1.0.1" (führendes v entfernen)
@@ -28,6 +29,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # von GitHub automatisch bereitgestellt
         run: |
-          gh release create "${GITHUB_REF_NAME}" "dist/AI Usage Bar.dmg" \
+          gh release create "${GITHUB_REF_NAME}" "dist/AIUsageBar.dmg" \
             --title "AI Usage Bar ${GITHUB_REF_NAME}" \
             --generate-notes

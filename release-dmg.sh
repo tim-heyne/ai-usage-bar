@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────
 # Baut "AI Usage Bar.app" und packt sie zusammen mit install.sh
-# und README in ein verteilbares DMG (dist/AI Usage Bar.dmg).
+# und README in ein verteilbares DMG (dist/AIUsageBar.dmg).
 #
 # Nutzt create-dmg falls vorhanden (schöneres Fenster),
 # sonst hdiutil als Fallback (immer verfügbar, kein brew nötig).
@@ -20,7 +20,7 @@ STAGING="$DIR/dist/dmg-staging"
 APP="$STAGING/$APP_NAME.app"
 MACOS="$APP/Contents/MacOS"
 RES="$APP/Contents/Resources"
-DMG="$DIR/dist/$APP_NAME.dmg"
+DMG="$DIR/dist/AIUsageBar.dmg"   # Dateiname ohne Leerzeichen (Volume-Label bleibt "AI Usage Bar")
 
 # ── 1. Staging aufräumen ─────────────────────────────────────
 echo "==> Räume Staging auf ..."
