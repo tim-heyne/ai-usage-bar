@@ -371,6 +371,9 @@ info.topMargin = margin; info.bottomMargin = margin
 info.leftMargin = margin; info.rightMargin = margin
 info.horizontalPagination = .fit
 info.verticalPagination = .automatic
+// Inhalt nicht zentrieren – sonst rutscht eine halbleere letzte Seite optisch in die Mitte.
+info.isHorizontallyCentered = false
+info.isVerticallyCentered = false
 
 let op = NSPrintOperation(view: textView, printInfo: info)
 op.showsPrintPanel = false
