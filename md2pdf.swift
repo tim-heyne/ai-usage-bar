@@ -27,6 +27,7 @@ guard let md = try? String(contentsOfFile: inPath, encoding: .utf8) else {
 
 extension NSAttributedString.Key {
     static let codeBlock = NSAttributedString.Key("md2pdfCodeBlock")
+    static let callout   = NSAttributedString.Key("md2pdfCallout")   // Wert: [tint, accent]
 }
 
 // ── Farben & Fonts ───────────────────────────────────────────
@@ -100,6 +101,17 @@ func appendInline(_ s: String, to out: NSMutableAttributedString,
             }
             i = rp + 1; continue
         }
+        // [[Wikilink]] bzw. [[Ziel|Alias]] – gestylter Text ohne Klammern
+        if chars[i] == "[", i + 1 < chars.count, chars[i + 1] == "[",
+           let rb = close(i + 2, ["]", "]"]) {
+            flush()
+            let inner = String(chars[(i + 2)..<rb])
+            let name = inner.components(separatedBy: "|").last ?? inner
+            out.append(NSAttributedString(string: name,
+                attributes: [.font: NSFont.boldSystemFont(ofSize: base.pointSize),
+                             .foregroundColor: linkColor, .paragraphStyle: ps]))
+            i = rb + 2; continue
+        }
         // [text](url) – Link
         if chars[i] == "[", let rb = close(i + 1, ["]"]),
            rb + 1 < chars.count, chars[rb + 1] == "(", let rp = close(rb + 2, [")"]) {
@@ -111,13 +123,13 @@ func appendInline(_ s: String, to out: NSMutableAttributedString,
             out.append(NSAttributedString(string: String(chars[(i + 1)..<rb]), attributes: a))
             i = rp + 1; continue
         }
-        // **fett**
+        // **fett** – rekursiv, damit `code` und *kursiv* darin funktionieren
         if i + 1 < chars.count, chars[i] == "*", chars[i + 1] == "*",
            let c = close(i + 2, ["*", "*"]) {
             flush()
-            out.append(NSAttributedString(string: String(chars[(i + 2)..<c]),
-                attributes: [.font: NSFont.boldSystemFont(ofSize: base.pointSize),
-                             .foregroundColor: color, .paragraphStyle: ps]))
+            appendInline(String(chars[(i + 2)..<c]), to: out,
+                         base: NSFont.boldSystemFont(ofSize: base.pointSize),
+                         color: color, ps: ps)
             i = c + 2; continue
         }
         // `code`
@@ -128,12 +140,11 @@ func appendInline(_ s: String, to out: NSMutableAttributedString,
                              .backgroundColor: inlineBg, .paragraphStyle: ps]))
             i = c + 1; continue
         }
-        // *kursiv*
+        // *kursiv* – rekursiv wie **fett**
         if chars[i] == "*", let c = close(i + 1, ["*"]) {
             flush()
             let it = NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask)
-            out.append(NSAttributedString(string: String(chars[(i + 1)..<c]),
-                attributes: [.font: it, .foregroundColor: color, .paragraphStyle: ps]))
+            appendInline(String(chars[(i + 1)..<c]), to: out, base: it, color: color, ps: ps)
             i = c + 1; continue
         }
         plain.append(chars[i]); i += 1
@@ -206,10 +217,120 @@ func appendTable(_ rows: [[String]]) {
 }
 
 var i = 0
+
+// YAML-Frontmatter (--- … ---) am Dateianfang überspringen
+if !lines.isEmpty && lines[0].trimmingCharacters(in: .whitespaces) == "---" {
+    var j = 1
+    while j < lines.count && lines[j].trimmingCharacters(in: .whitespaces) != "---" { j += 1 }
+    if j < lines.count { i = j + 1 }
+}
+
 while i < lines.count {
     let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
 
     if trimmed.isEmpty { i += 1; continue }
+
+    // Blockquote / Obsidian-Callout: > [!typ] Titel  +  > Folgezeilen
+    if trimmed.hasPrefix(">") {
+        var quote: [String] = []
+        while i < lines.count {
+            let t = lines[i].trimmingCharacters(in: .whitespaces)
+            guard t.hasPrefix(">") else { break }
+            var inner = String(t.dropFirst())
+            if inner.hasPrefix(" ") { inner.removeFirst() }
+            quote.append(inner); i += 1
+        }
+        // Typ & Titel aus der ersten Zeile ([!info] Titel); ohne [!…] = normales Zitat
+        var accent = NSColor(calibratedWhite: 0.45, alpha: 1)
+        var tint   = NSColor(calibratedWhite: 0.955, alpha: 1)
+        var title: String? = nil
+        var bodyStart = 0
+        if let first = quote.first,
+           let m = first.range(of: "^\\[!([A-Za-z]+)\\][-+]?\\s*", options: .regularExpression) {
+            let typ = first.replacingOccurrences(of: "^\\[!([A-Za-z]+)\\].*$", with: "$1",
+                                                 options: .regularExpression).lowercased()
+            switch typ {
+            case "warning", "caution", "attention", "bug", "danger", "error", "fail", "failure", "missing":
+                accent = NSColor(srgbRed: 0.78, green: 0.33, blue: 0.08, alpha: 1)
+                tint   = NSColor(srgbRed: 1.00, green: 0.955, blue: 0.91, alpha: 1)
+            case "important", "question", "help", "faq":
+                accent = NSColor(srgbRed: 0.52, green: 0.28, blue: 0.75, alpha: 1)
+                tint   = NSColor(srgbRed: 0.965, green: 0.945, blue: 1.00, alpha: 1)
+            case "check", "success", "done", "tip", "hint":
+                accent = NSColor(srgbRed: 0.12, green: 0.52, blue: 0.24, alpha: 1)
+                tint   = NSColor(srgbRed: 0.93, green: 0.975, blue: 0.93, alpha: 1)
+            default:   // info, note, todo, abstract, summary, example, quote …
+                accent = NSColor(srgbRed: 0.04, green: 0.40, blue: 0.74, alpha: 1)
+                tint   = NSColor(srgbRed: 0.925, green: 0.955, blue: 1.00, alpha: 1)
+            }
+            let rest = String(first[m.upperBound...]).trimmingCharacters(in: .whitespaces)
+            title = rest.isEmpty ? typ.prefix(1).uppercased() + typ.dropFirst() : rest
+            bodyStart = 1
+        }
+        let markStart = out.length
+        let padL: CGFloat = 10
+        if let title {
+            let tp = ps(spacingBefore: 5, spacingAfter: 3, firstIndent: padL, headIndent: padL)
+            appendInline(title, to: out, base: bold, color: accent, ps: tp); newline(tp)
+        }
+        // Innere Zeilen: Mini-Parser für Absätze, Listen und Code-Zeilen
+        var k = bodyStart
+        var inFence = false
+        var paraBuf: [String] = []
+        func flushQuotePara() {
+            guard !paraBuf.isEmpty else { return }
+            let p = ps(spacingAfter: 3, firstIndent: padL, headIndent: padL)
+            appendInline(paraBuf.joined(separator: " "), to: out, base: body, color: textColor, ps: p)
+            newline(p)
+            paraBuf = []
+        }
+        while k < quote.count {
+            let qt = quote[k].trimmingCharacters(in: .whitespaces)
+            if qt.hasPrefix("```") { flushQuotePara(); inFence.toggle(); k += 1; continue }
+            if inFence {
+                let p = ps(spacingAfter: 0, firstIndent: padL + 6, headIndent: padL + 6, lineSpacing: 2)
+                out.append(NSAttributedString(string: quote[k] + "\n",
+                    attributes: [.font: codeMono, .foregroundColor: codeColor, .paragraphStyle: p]))
+                k += 1; continue
+            }
+            if qt.isEmpty { flushQuotePara(); k += 1; continue }
+            if qt.hasPrefix("- ") {
+                flushQuotePara()
+                let p = ps(spacingAfter: 2, firstIndent: padL + 2, headIndent: padL + 14, tab: padL + 14)
+                out.append(NSAttributedString(string: "•\t",
+                    attributes: [.font: body, .foregroundColor: textColor, .paragraphStyle: p]))
+                appendInline(String(qt.dropFirst(2)), to: out, base: body, color: textColor, ps: p); newline(p)
+                k += 1; continue
+            }
+            if isOrdered(qt) {
+                flushQuotePara()
+                let num = String(qt.prefix(while: { $0 != " " }))
+                let rest = qt.replacingOccurrences(of: "^[0-9]+\\. ", with: "", options: .regularExpression)
+                let p = ps(spacingAfter: 2, firstIndent: padL + 2, headIndent: padL + 20, tab: padL + 20)
+                out.append(NSAttributedString(string: "\(num)\t",
+                    attributes: [.font: bold, .foregroundColor: textColor, .paragraphStyle: p]))
+                appendInline(rest, to: out, base: body, color: textColor, ps: p); newline(p)
+                k += 1; continue
+            }
+            paraBuf.append(qt); k += 1
+        }
+        flushQuotePara()
+        out.addAttribute(.callout, value: [tint, accent],
+                         range: NSRange(location: markStart, length: out.length - markStart))
+        newline(ps(spacingAfter: 9))
+        continue
+    }
+
+    // Trennlinie: --- / *** / ___ auf eigener Zeile
+    if trimmed.range(of: "^(-{3,}|\\*{3,}|_{3,})$", options: .regularExpression) != nil {
+        let p = ps(spacingBefore: 5, spacingAfter: 9)
+        let ruleFont = NSFont.systemFont(ofSize: 8)
+        let dashW = ("─" as NSString).size(withAttributes: [.font: ruleFont]).width
+        let count = max(10, Int(maxContentW / dashW) - 1)   // knapp unter Satzbreite → kein Umbruch
+        out.append(NSAttributedString(string: String(repeating: "─", count: count) + "\n",
+            attributes: [.font: ruleFont, .foregroundColor: codeBorder, .paragraphStyle: p]))
+        i += 1; continue
+    }
 
     // Codeblock
     if trimmed.hasPrefix("```") {
@@ -220,7 +341,10 @@ while i < lines.count {
         }
         if i < lines.count { i += 1 }
         let codePS = ps(spacingBefore: 5, spacingAfter: 9, firstIndent: 9, headIndent: 9, lineSpacing: 2)
-        out.append(NSAttributedString(string: buf.joined(separator: "\n") + "\n",
+        // U+2028 (Zeilentrenner) statt \n: Der ganze Block bleibt EIN Absatz,
+        // paragraphSpacing fällt also nur einmal am Ende an – keine Leerzeilen
+        // zwischen den Code-Zeilen.
+        out.append(NSAttributedString(string: buf.joined(separator: "\u{2028}") + "\n",
             attributes: [.font: codeMono, .foregroundColor: codeColor,
                          .paragraphStyle: codePS, .codeBlock: true]))
         continue
@@ -273,7 +397,8 @@ while i < lines.count {
             guard t.hasPrefix("- ") else { break }
             var item = String(t.dropFirst(2)); i += 1
             while i < lines.count && isIndentedCont(lines[i])
-                  && !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("- ") {
+                  && !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("- ")
+                  && !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
                 item += " " + lines[i].trimmingCharacters(in: .whitespaces); i += 1
             }
             let p = ps(spacingAfter: 3, firstIndent: 2, headIndent: 16, tab: 16)
@@ -284,22 +409,24 @@ while i < lines.count {
         continue
     }
 
-    // Geordnete Liste
+    // Geordnete Liste – nutzt die Original-Nummern der Quelle. So bleibt die
+    // Zählung korrekt, wenn ein Code-Block die Liste unterbricht (der die
+    // Item-Faltung beendet und vom Hauptloop als Block gerendert wird).
     if isOrdered(trimmed) {
-        var n = 1
         while i < lines.count {
             let t = lines[i].trimmingCharacters(in: .whitespaces)
             guard isOrdered(t) else { break }
+            let num = String(t.prefix(while: { $0 != " " }))
             var item = t.replacingOccurrences(of: "^[0-9]+\\. ", with: "", options: .regularExpression); i += 1
             while i < lines.count && isIndentedCont(lines[i])
-                  && !isOrdered(lines[i].trimmingCharacters(in: .whitespaces)) {
+                  && !isOrdered(lines[i].trimmingCharacters(in: .whitespaces))
+                  && !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
                 item += " " + lines[i].trimmingCharacters(in: .whitespaces); i += 1
             }
             let p = ps(spacingAfter: 3, firstIndent: 2, headIndent: 20, tab: 20)
-            out.append(NSAttributedString(string: "\(n).\t",
+            out.append(NSAttributedString(string: "\(num)\t",
                 attributes: [.font: bold, .foregroundColor: textColor, .paragraphStyle: p]))
             appendInline(item, to: out, base: body, color: textColor, ps: p); newline(p)
-            n += 1
         }
         continue
     }
@@ -309,7 +436,9 @@ while i < lines.count {
     while i < lines.count {
         let t = lines[i].trimmingCharacters(in: .whitespaces)
         if t.isEmpty || t.hasPrefix("#") || t.hasPrefix("- ") || t.hasPrefix("```")
-            || t.hasPrefix("![") || (t.contains("|") && i + 1 < lines.count && isTableSeparator(lines[i + 1]))
+            || t.hasPrefix("![") || t.hasPrefix(">")
+            || t.range(of: "^(-{3,}|\\*{3,}|_{3,})$", options: .regularExpression) != nil
+            || (t.contains("|") && i + 1 < lines.count && isTableSeparator(lines[i + 1]))
             || isOrdered(t) { break }
         para.append(t); i += 1
     }
@@ -321,6 +450,20 @@ while i < lines.count {
 final class CodeLayoutManager: NSLayoutManager {
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         if let tc = textContainers.first, let ts = textStorage {
+            // Callout-Boxen: getönte Fläche + Akzentbalken links
+            ts.enumerateAttribute(.callout, in: NSRange(location: 0, length: ts.length), options: []) { value, range, _ in
+                guard let colors = value as? [NSColor], colors.count == 2 else { return }
+                let gr = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                guard NSIntersectionRange(gr, glyphsToShow).length > 0 else { return }
+                var rect = boundingRect(forGlyphRange: gr, in: tc).offsetBy(dx: origin.x, dy: origin.y)
+                rect.origin.x = origin.x
+                rect.size.width = tc.size.width
+                let box = rect.insetBy(dx: 0, dy: -4)
+                let path = NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5)
+                colors[0].setFill(); path.fill()
+                let bar = NSRect(x: box.minX, y: box.minY, width: 3, height: box.height)
+                colors[1].setFill(); NSBezierPath(roundedRect: bar, xRadius: 1.5, yRadius: 1.5).fill()
+            }
             // Über den GESAMTEN Text iterieren, damit pro Code-Block die
             // volle (durchgehende) Range gezeichnet wird – nicht pro Zeile.
             ts.enumerateAttribute(.codeBlock, in: NSRange(location: 0, length: ts.length), options: []) { value, range, _ in
