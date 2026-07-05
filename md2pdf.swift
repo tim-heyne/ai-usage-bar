@@ -1,9 +1,11 @@
 import AppKit
 import Foundation
+import PDFKit
 
 // ─────────────────────────────────────────────────────────────
 // Markdown → PDF, rein programmatisch (nur macOS-Bordmittel).
-// Aufruf: md2pdf <input.md> <output.pdf>
+// Aufruf: md2pdf [--accent '#RRGGBB'] <input.md> <output.pdf>
+//         md2pdf --extract <datei.pdf>          (Text ausgeben, zum Verifizieren)
 //
 // Baut einen NSAttributedString von Hand (volle Kontrolle über
 // Bullets, Einrückungen, Code-Stil) und druckt ihn über
@@ -12,13 +14,44 @@ import Foundation
 // durchgehende Hintergrundfläche in voller Breite.
 // ─────────────────────────────────────────────────────────────
 
-let args = CommandLine.arguments
-guard args.count >= 3 else {
-    FileHandle.standardError.write("Usage: md2pdf <input.md> <output.pdf>\n".data(using: .utf8)!)
+func fail(_ msg: String) -> Never {
+    FileHandle.standardError.write((msg + "\n").data(using: .utf8)!)
     exit(1)
 }
-let inPath = args[1]
-let outPath = args[2]
+
+var argv = Array(CommandLine.arguments.dropFirst())
+
+// --extract: Text aus einem PDF ausgeben (Verifikation ohne pypdf/poppler)
+if argv.first == "--extract" {
+    guard argv.count == 2 else { fail("Usage: md2pdf --extract <datei.pdf>") }
+    guard let doc = PDFDocument(url: URL(fileURLWithPath: argv[1])) else {
+        fail("Kann \(argv[1]) nicht als PDF öffnen")
+    }
+    print("Seiten: \(doc.pageCount)")
+    print(doc.string ?? "")
+    exit(0)
+}
+
+// --accent '#RRGGBB': Akzentfarbe der ##-Überschriften (Default: Orange)
+var accentColor: NSColor? = nil
+if let idx = argv.firstIndex(of: "--accent") {
+    guard idx + 1 < argv.count else { fail("--accent braucht einen Wert, z.B. --accent '#5B4FCF'") }
+    var hex = argv[idx + 1].trimmingCharacters(in: .whitespaces)
+    if hex.hasPrefix("#") { hex.removeFirst() }
+    guard hex.count == 6, let v = UInt32(hex, radix: 16) else {
+        fail("Ungültige Akzentfarbe '\(argv[idx + 1])' — erwartet '#RRGGBB'")
+    }
+    accentColor = NSColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255,
+                          green: CGFloat((v >> 8) & 0xFF) / 255,
+                          blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+    argv.removeSubrange(idx...(idx + 1))
+}
+
+guard argv.count >= 2 else {
+    fail("Usage: md2pdf [--accent '#RRGGBB'] <input.md> <output.pdf>\n       md2pdf --extract <datei.pdf>")
+}
+let inPath = argv[0]
+let outPath = argv[1]
 
 guard let md = try? String(contentsOfFile: inPath, encoding: .utf8) else {
     FileHandle.standardError.write("Kann \(inPath) nicht lesen\n".data(using: .utf8)!)
@@ -32,7 +65,7 @@ extension NSAttributedString.Key {
 
 // ── Farben & Fonts ───────────────────────────────────────────
 let textColor   = NSColor(calibratedWhite: 0.12, alpha: 1)
-let h2Color     = NSColor(srgbRed: 0.71, green: 0.28, blue: 0.12, alpha: 1)
+let h2Color     = accentColor ?? NSColor(srgbRed: 0.71, green: 0.28, blue: 0.12, alpha: 1)
 let codeColor   = NSColor(calibratedWhite: 0.15, alpha: 1)
 let inlineBg    = NSColor(calibratedWhite: 0.93, alpha: 1)
 let codeBlockBg = NSColor(calibratedWhite: 0.965, alpha: 1)
@@ -349,6 +382,10 @@ while i < lines.count {
                          .paragraphStyle: codePS, .codeBlock: true]))
         continue
     }
+
+    // Obsidian-Embed ![[…]] als eigener Block: im PDF nicht auflösbar
+    // (Vault-interne Referenz, z.B. die eingebettete PDF-Version) → überspringen
+    if trimmed.hasPrefix("![[") && trimmed.hasSuffix("]]") { i += 1; continue }
 
     // Bild als eigener Block: ![alt](pfad)
     if trimmed.hasPrefix("!["), let rb = trimmed.range(of: "]("),
