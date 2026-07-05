@@ -220,7 +220,14 @@ func splitRow(_ s: String) -> [String] {
     var t = s.trimmingCharacters(in: .whitespaces)
     if t.hasPrefix("|") { t.removeFirst() }
     if t.hasSuffix("|") { t.removeLast() }
-    return t.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    // Escaptes \| (z.B. in Wikilink-Aliasen [[Ziel\|Alias]]) ist KEIN Spalten-
+    // Trenner: vor dem Split maskieren, in den Zellen wieder als | herstellen,
+    // damit der Inline-Parser den Alias-Wikilink erkennt.
+    let esc = "\u{F8FF}"   // Private-Use-Zeichen, kommt in Notizen nicht vor
+    t = t.replacingOccurrences(of: "\\|", with: esc)
+    return t.components(separatedBy: "|").map {
+        $0.replacingOccurrences(of: esc, with: "|").trimmingCharacters(in: .whitespaces)
+    }
 }
 func appendTable(_ rows: [[String]]) {
     guard !rows.isEmpty else { return }
