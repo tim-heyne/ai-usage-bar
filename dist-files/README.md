@@ -13,9 +13,15 @@ Klick auf das Menüleisten-Element zeigt Details (Balken, Prozent, wann sich das
 
 ## Installation
 1. Das **DMG per Doppelklick öffnen**.
-2. Im Finder Rechtsklick auf **install.sh** → *Öffnen mit* → *Terminal*
-   – oder im Terminal: `"/Volumes/AI Usage Bar/install.sh"`
+2. Terminal öffnen (z.B. über Spotlight: `⌘ + Leertaste`, „Terminal" tippen) und diese Zeile ausführen:
+   ```
+   bash "/Volumes/AI Usage Bar/install.sh"
+   ```
 3. Fertig. Die App erscheint in der Menüleiste und startet künftig automatisch beim Login.
+
+> **Warum über `bash`?** Heruntergeladene DMGs stehen unter macOS-Quarantäne. Seit macOS 15
+> blockiert Gatekeeper das direkte Ausführen von Skripten davon (auch per Rechtsklick → Öffnen).
+> Der Aufruf über `bash` liest das Skript nur als Datei und funktioniert deshalb überall.
 
 Falls in der Menüleiste **„Claude ⚠ / Kein Login gefunden"** steht: einmal `claude` im Terminal
 starten und einloggen, dann im App-Menü *Jetzt aktualisieren* wählen.

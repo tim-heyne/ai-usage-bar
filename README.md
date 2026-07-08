@@ -22,8 +22,13 @@ Eine schlanke **macOS-Menüleisten-App**, die deinen aktuellen Claude-Verbrauch 
 ## Installation (fertiges DMG)
 
 1. DMG aus den [Releases](https://github.com/tim-heyne/ai-usage-bar/releases/latest) herunterladen und per Doppelklick öffnen.
-2. Im Finder Rechtsklick auf `install.sh` → *Öffnen mit* → *Terminal*.
+2. Im Terminal ausführen:
+   ```bash
+   bash "/Volumes/AI Usage Bar/install.sh"
+   ```
 3. Die App erscheint in der Menüleiste und startet künftig automatisch beim Login.
+
+> **Hinweis:** Das DMG steht nach dem Download unter macOS-Quarantäne. Seit macOS 15 blockiert Gatekeeper das direkte Ausführen von Skripten davon (auch per Rechtsklick → *Öffnen mit* → *Terminal*). Der Umweg über `bash` liest das Skript nur als Datei und funktioniert deshalb zuverlässig.
 
 ## Aus dem Quellcode bauen
 
