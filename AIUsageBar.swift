@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var lastFetch = Date.distantPast
     var lastData: UsageData?
     var lastError: String?
+    var isRefreshing = false
 
     let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     let refreshInterval: TimeInterval = 300   // Hintergrund-Refresh alle 5 Min
@@ -34,16 +35,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         rebuildMenu()
-        refresh(force: true)
+        refresh()
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
-            self?.refresh(force: true)
+            self?.refresh()
         }
+        timer?.tolerance = 30   // erlaubt dem System, Wakeups zu bündeln (Energie)
     }
 
     // Menü öffnet sich -> ggf. frische Daten holen
     func menuWillOpen(_ menu: NSMenu) {
         if Date().timeIntervalSince(lastFetch) > menuThrottle {
-            refresh(force: true)
+            refresh()
         }
     }
 
@@ -65,14 +67,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func tokenFromKeychain() -> String? {
         let p = Process()
-        p.launchPath = "/usr/bin/security"
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         p.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
         let outPipe = Pipe()
         p.standardOutput = outPipe
         p.standardError = Pipe()
         do { try p.run() } catch { return nil }
-        p.waitUntilExit()
+        // Erst lesen, dann warten – umgekehrt kann der Prozess bei vollem Pipe-Puffer hängen
         let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
         return extractToken(data)
     }
 
@@ -84,43 +87,64 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Netzwerk
 
-    func refresh(force: Bool) {
-        guard let token = accessToken() else {
-            DispatchQueue.main.async {
-                self.lastError = "Kein Login gefunden – in Claude Code einloggen"
-                self.lastData = nil
-                self.updateUI()
-            }
-            return
-        }
-        var req = URLRequest(url: endpoint)
-        req.timeoutInterval = 15
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
+    // Wird immer vom Main-Thread aufgerufen (Launch, Timer, Menü, Klick).
+    // Token-Suche und Request laufen im Hintergrund, das UI-Update wieder auf Main.
+    func refresh() {
+        if isRefreshing { return }
+        isRefreshing = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-            DispatchQueue.main.async {
-                self.lastFetch = Date()
+            guard let token = self.accessToken() else {
+                self.finishRefresh(data: nil, error: "Kein Login gefunden – in Claude Code einloggen", clearData: true)
+                return
+            }
+            var req = URLRequest(url: self.endpoint)
+            req.timeoutInterval = 15
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
+                guard let self = self else { return }
                 if let err = err {
-                    self.lastError = err.localizedDescription
-                    self.updateUI(); return
+                    self.finishRefresh(data: nil, error: err.localizedDescription)
+                    return
                 }
-                if let http = resp as? HTTPURLResponse, http.statusCode == 429 {
-                    self.lastError = "Rate-Limit (429) – kurz warten"
-                    self.updateUI(); return
+                let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                switch status {
+                case 200..<300:
+                    break
+                case 401, 403:
+                    self.finishRefresh(data: nil, error: "Token abgelaufen – in Claude Code neu einloggen")
+                    return
+                case 429:
+                    self.finishRefresh(data: nil, error: "Rate-Limit (429) – kurz warten")
+                    return
+                default:
+                    self.finishRefresh(data: nil, error: "Server-Fehler (HTTP \(status))")
+                    return
                 }
                 guard let data = data,
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    self.lastError = "Antwort nicht lesbar"
-                    self.updateUI(); return
+                    self.finishRefresh(data: nil, error: "Antwort nicht lesbar")
+                    return
                 }
-                self.lastError = nil
-                self.lastData = self.parse(obj)
-                self.updateUI()
-            }
-        }.resume()
+                self.finishRefresh(data: self.parse(obj), error: nil)
+            }.resume()
+        }
+    }
+
+    // Sammelt alle Refresh-Ausgänge: bei Fehlern bleiben die letzten Daten sichtbar,
+    // der Fehler wird zusätzlich im Menü/Tooltip angezeigt.
+    private func finishRefresh(data: UsageData?, error: String?, clearData: Bool = false) {
+        DispatchQueue.main.async {
+            self.isRefreshing = false
+            self.lastFetch = Date()
+            if let data = data { self.lastData = data }
+            if clearData { self.lastData = nil }
+            self.lastError = error
+            self.updateUI()
+        }
     }
 
     func parse(_ obj: [String: Any]) -> UsageData {
@@ -143,12 +167,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
     }
 
-    static func parseDate(_ s: String) -> Date? {
+    // Formatter sind teuer in der Erzeugung – einmal anlegen, wiederverwenden
+    static let isoFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: s) { return d }
-        f.formatOptions = [.withInternetDateTime]
-        return f.date(from: s)
+        return f
+    }()
+    static let isoPlain = ISO8601DateFormatter()
+    static let resetFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "de_DE")
+        df.dateFormat = "EEE HH:mm"
+        return df
+    }()
+    static let clockFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "HH:mm:ss"
+        return df
+    }()
+
+    static func parseDate(_ s: String) -> Date? {
+        return isoFractional.date(from: s) ?? isoPlain.date(from: s)
     }
 
     // MARK: - UI
@@ -199,7 +238,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Menüleiste: nur 5-Stunden-Verbrauch als Gauge-Ring
             btn.image = gaugeImage(percent: d.sessionPercent, color: color(for: d.sessionPercent))
             btn.contentTintColor = nil
-            btn.toolTip = "Session \(d.sessionPercent) %  ·  Woche \(d.weeklyPercent) %"
+            var tip = "Session \(d.sessionPercent) %  ·  Woche \(d.weeklyPercent) %"
+            if let err = lastError { tip += "  ·  ⚠︎ \(err)" }
+            btn.toolTip = tip
         } else {
             let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
             let warn = NSImage(systemSymbolName: "exclamationmark.triangle.fill",
@@ -214,10 +255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func resetText(_ date: Date?) -> String {
         guard let date = date else { return "" }
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "de_DE")
-        df.dateFormat = "EEE HH:mm"
-        let abs = df.string(from: date)
+        let abs = Self.resetFormatter.string(from: date)
         let secs = date.timeIntervalSinceNow
         if secs <= 0 { return "Reset jetzt (\(abs))" }
         let h = Int(secs) / 3600
@@ -260,14 +298,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let d = lastData {
             header("Session (5 Std)")
             detail("  \(bar(d.sessionPercent))  \(d.sessionPercent)%", percent: d.sessionPercent)
-            if !resetText(d.sessionReset).isEmpty { detail("  " + resetText(d.sessionReset)) }
+            let sessionReset = resetText(d.sessionReset)
+            if !sessionReset.isEmpty { detail("  " + sessionReset) }
             menu.addItem(.separator())
             header("Woche (7 Tage)")
             detail("  \(bar(d.weeklyPercent))  \(d.weeklyPercent)%", percent: d.weeklyPercent)
-            if !resetText(d.weeklyReset).isEmpty { detail("  " + resetText(d.weeklyReset)) }
+            let weeklyReset = resetText(d.weeklyReset)
+            if !weeklyReset.isEmpty { detail("  " + weeklyReset) }
             menu.addItem(.separator())
-            let df = DateFormatter(); df.dateFormat = "HH:mm:ss"
-            detail("Aktualisiert: \(df.string(from: lastFetch))")
+            detail("Aktualisiert: \(Self.clockFormatter.string(from: lastFetch))")
+            // Fehler beim letzten Refresh anzeigen, auch wenn noch alte Daten stehen
+            if let err = lastError { detail("⚠︎ \(err)") }
         } else {
             header("AI Usage Bar")
             detail("  Fehler: \(lastError ?? "unbekannt")")
@@ -282,7 +323,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
-    @objc func manualRefresh() { refresh(force: true) }
+    @objc func manualRefresh() { refresh() }
     @objc func quit() { NSApplication.shared.terminate(nil) }
 }
 
