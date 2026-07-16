@@ -49,26 +49,66 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // MARK: - Token
+    // MARK: - Credentials
 
-    // Liest den OAuth-Token des aktuellen Users: erst aus dem macOS-Keychain,
+    // OAuth-Endpunkt und öffentliche Client-ID von Claude Code (aus dem CLI extrahiert).
+    // Damit erneuert die App abgelaufene Access Tokens selbst per Refresh Token,
+    // statt auf einen Neu-Login in Claude Code zu warten.
+    let tokenEndpoint = URL(string: "https://platform.claude.com/v1/oauth/token")!
+    static let oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    static let keychainService = "Claude Code-credentials"
+
+    struct Credentials {
+        enum Source { case keychain, file }
+        var root: [String: Any]      // komplettes JSON, damit beim Zurückschreiben nichts verloren geht
+        var accessToken: String
+        var refreshToken: String?
+        var expiresAt: Double?       // Millisekunden seit 1970 (Claude-Code-Format)
+        var source: Source
+
+        // 60 s Puffer, damit der Token nicht mitten im Request abläuft
+        var isExpired: Bool {
+            guard let ms = expiresAt else { return false }
+            return Date(timeIntervalSince1970: ms / 1000).timeIntervalSinceNow < 60
+        }
+    }
+
+    // Liest die OAuth-Credentials des aktuellen Users: erst aus dem macOS-Keychain,
     // als Fallback aus ~/.claude/.credentials.json. Funktioniert so für jeden
     // Claude-User, der lokal in Claude Code eingeloggt ist.
-    func accessToken() -> String? {
-        return tokenFromKeychain() ?? tokenFromFile()
+    func loadCredentials() -> Credentials? {
+        return credentialsFromKeychain() ?? credentialsFromFile()
     }
 
-    private func extractToken(_ jsonData: Data) -> String? {
-        guard let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let oauth = obj["claudeAiOauth"] as? [String: Any],
+    private func parseCredentials(_ jsonData: Data, source: Credentials.Source) -> Credentials? {
+        guard let root = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let oauth = root["claudeAiOauth"] as? [String: Any],
               let token = oauth["accessToken"] as? String else { return nil }
-        return token
+        return Credentials(root: root,
+                           accessToken: token,
+                           refreshToken: oauth["refreshToken"] as? String,
+                           expiresAt: (oauth["expiresAt"] as? NSNumber)?.doubleValue,
+                           source: source)
     }
 
-    private func tokenFromKeychain() -> String? {
+    private func credentialsFromKeychain() -> Credentials? {
+        guard let data = runSecurity(["find-generic-password", "-s", Self.keychainService, "-w"]) else { return nil }
+        return parseCredentials(data, source: .keychain)
+    }
+
+    private func credentialsFromFile() -> Credentials? {
+        guard let data = FileManager.default.contents(atPath: credentialsFilePath) else { return nil }
+        return parseCredentials(data, source: .file)
+    }
+
+    private var credentialsFilePath: String {
+        (NSHomeDirectory() as NSString).appendingPathComponent(".claude/.credentials.json")
+    }
+
+    private func runSecurity(_ arguments: [String]) -> Data? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        p.arguments = arguments
         let outPipe = Pipe()
         p.standardOutput = outPipe
         p.standardError = Pipe()
@@ -76,13 +116,76 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Erst lesen, dann warten – umgekehrt kann der Prozess bei vollem Pipe-Puffer hängen
         let data = outPipe.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        return extractToken(data)
+        return p.terminationStatus == 0 ? data : nil
     }
 
-    private func tokenFromFile() -> String? {
-        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/.credentials.json")
-        guard let data = FileManager.default.contents(atPath: path) else { return nil }
-        return extractToken(data)
+    // MARK: - Token-Refresh
+
+    // Holt mit dem Refresh Token ein frisches Token-Paar und schreibt es in die
+    // gelesene Quelle zurück. Das Zurückschreiben ist Pflicht: Anthropic rotiert
+    // beim Refresh auch den Refresh Token – ohne Update würde Claude Code beim
+    // nächsten Start seinen Login verlieren. Synchron, nur aus Hintergrund-Queues aufrufen.
+    private func renewCredentials(_ creds: Credentials) -> Credentials? {
+        guard let refreshToken = creds.refreshToken else { return nil }
+        var req = URLRequest(url: tokenEndpoint)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 15
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["grant_type": "refresh_token",
+                                   "refresh_token": refreshToken,
+                                   "client_id": Self.oauthClientID]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        let sem = DispatchSemaphore(value: 0)
+        var renewed: Credentials?
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            defer { sem.signal() }
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let newAccess = obj["access_token"] as? String else { return }
+            var root = creds.root
+            var oauth = root["claudeAiOauth"] as? [String: Any] ?? [:]
+            oauth["accessToken"] = newAccess
+            let newRefresh = (obj["refresh_token"] as? String) ?? refreshToken
+            oauth["refreshToken"] = newRefresh
+            var expiresAt = creds.expiresAt
+            if let expiresIn = (obj["expires_in"] as? NSNumber)?.doubleValue {
+                expiresAt = (Date().timeIntervalSince1970 + expiresIn) * 1000
+                oauth["expiresAt"] = Int(expiresAt!)
+            }
+            root["claudeAiOauth"] = oauth
+            var result = creds
+            result.root = root
+            result.accessToken = newAccess
+            result.refreshToken = newRefresh
+            result.expiresAt = expiresAt
+            renewed = result
+        }.resume()
+        sem.wait()
+
+        if let renewed = renewed, storeCredentials(renewed) { return renewed }
+        return nil
+    }
+
+    @discardableResult
+    private func storeCredentials(_ creds: Credentials) -> Bool {
+        guard let data = try? JSONSerialization.data(withJSONObject: creds.root) else { return false }
+        switch creds.source {
+        case .keychain:
+            guard let json = String(data: data, encoding: .utf8) else { return false }
+            return runSecurity(["add-generic-password", "-U",
+                                "-a", NSUserName(),
+                                "-s", Self.keychainService,
+                                "-w", json]) != nil
+        case .file:
+            do {
+                try data.write(to: URL(fileURLWithPath: credentialsFilePath), options: .atomic)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                                       ofItemAtPath: credentialsFilePath)
+                return true
+            } catch { return false }
+        }
     }
 
     // MARK: - Netzwerk
@@ -94,44 +197,64 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isRefreshing = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-            guard let token = self.accessToken() else {
+            guard let creds = self.loadCredentials() else {
                 self.finishRefresh(data: nil, error: "Kein Login gefunden – in Claude Code einloggen", clearData: true)
                 return
             }
-            var req = URLRequest(url: self.endpoint)
-            req.timeoutInterval = 15
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-            URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
-                guard let self = self else { return }
-                if let err = err {
-                    self.finishRefresh(data: nil, error: err.localizedDescription)
+            // Abgelaufener Access Token: erst per Refresh Token erneuern.
+            // Nur bei Bedarf (abgelaufen bzw. unten bei 401), nicht proaktiv –
+            // sonst rotieren App und Claude Code sich gegenseitig die Tokens weg.
+            if creds.isExpired, creds.refreshToken != nil {
+                guard let renewed = self.renewCredentials(creds) else {
+                    self.finishRefresh(data: nil, error: "Token-Refresh fehlgeschlagen – in Claude Code neu einloggen")
                     return
                 }
-                let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                switch status {
-                case 200..<300:
-                    break
-                case 401, 403:
-                    self.finishRefresh(data: nil, error: "Token abgelaufen – in Claude Code neu einloggen")
-                    return
-                case 429:
-                    self.finishRefresh(data: nil, error: "Rate-Limit (429) – kurz warten")
-                    return
-                default:
-                    self.finishRefresh(data: nil, error: "Server-Fehler (HTTP \(status))")
-                    return
-                }
-                guard let data = data,
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    self.finishRefresh(data: nil, error: "Antwort nicht lesbar")
-                    return
-                }
-                self.finishRefresh(data: self.parse(obj), error: nil)
-            }.resume()
+                self.fetchUsage(renewed, allowRenew: false)
+            } else {
+                self.fetchUsage(creds, allowRenew: creds.refreshToken != nil)
+            }
         }
+    }
+
+    // Fragt die Usage-API ab; bei 401/403 wird einmalig ein Token-Refresh versucht.
+    private func fetchUsage(_ creds: Credentials, allowRenew: Bool) {
+        var req = URLRequest(url: endpoint)
+        req.timeoutInterval = 15
+        req.setValue("Bearer \(creds.accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
+            guard let self = self else { return }
+            if let err = err {
+                self.finishRefresh(data: nil, error: err.localizedDescription)
+                return
+            }
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            switch status {
+            case 200..<300:
+                break
+            case 401, 403:
+                if allowRenew, let renewed = self.renewCredentials(creds) {
+                    self.fetchUsage(renewed, allowRenew: false)
+                } else {
+                    self.finishRefresh(data: nil, error: "Token abgelaufen – in Claude Code neu einloggen")
+                }
+                return
+            case 429:
+                self.finishRefresh(data: nil, error: "Rate-Limit (429) – kurz warten")
+                return
+            default:
+                self.finishRefresh(data: nil, error: "Server-Fehler (HTTP \(status))")
+                return
+            }
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                self.finishRefresh(data: nil, error: "Antwort nicht lesbar")
+                return
+            }
+            self.finishRefresh(data: self.parse(obj), error: nil)
+        }.resume()
     }
 
     // Sammelt alle Refresh-Ausgänge: bei Fehlern bleiben die letzten Daten sichtbar,

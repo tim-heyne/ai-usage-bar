@@ -11,6 +11,7 @@ Eine schlanke **macOS-Menüleisten-App**, die deinen aktuellen Claude-Verbrauch 
 
 - **Session-Limit** (rollierende 5 Stunden) und **Wochenlimit** (rollierende 7 Tage) auf einen Blick
 - Detail-Popover mit Balken, Prozentwerten und Reset-Zeitpunkt
+- **Automatischer Token-Refresh**: Läuft der Access Token von Claude Code ab, erneuert die App ihn selbst per OAuth-Refresh-Token und schreibt das neue Token-Paar in den Keychain zurück – kein tägliches Neu-Einloggen mehr. Ein Neu-Login ist erst nötig, wenn auch der Refresh Token abläuft (~4 Wochen ohne jede Claude-Nutzung).
 - Läuft unsichtbar ohne Dock-Icon (`LSUIElement`), optionaler **Autostart beim Login**
 - Native **Swift/AppKit**-App, eine einzige Quelldatei, keine Laufzeitabhängigkeiten
 
